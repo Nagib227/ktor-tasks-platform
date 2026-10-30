@@ -1,0 +1,380 @@
+openapi: 3.0.3
+info:
+  title: Сервер задач
+  version: 1.0.0
+  description: "CRUD задач, PostgreSQL, роли USER и ADMIN, JWT и WebSocket. Чтение задач публичное. Создание доступно любому пользователю. Изменение — владельцу или администратору. Удаление и список пользователей — только администратору."
+servers:
+  - url: http://localhost:8080
+tags:
+  - name: Задачи
+  - name: Аутентификация
+  - name: Пользователи
+  - name: Уведомления
+paths:
+  /:
+    get:
+      tags: [Задачи]
+      operationId: serviceInfo
+      summary: Описание сервиса
+      responses:
+        "200":
+          description: Имя и краткое описание API
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceInfo"
+  /tasks:
+    get:
+      tags: [Задачи]
+      operationId: listTasks
+      summary: Список задач
+      responses:
+        "200":
+          description: Все задачи, отсортированные по id
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Task"
+    post:
+      tags: [Задачи]
+      operationId: createTask
+      summary: Создать задачу
+      description: "Любая роль с действительным JWT. ownerId равен userId из токена. После записи сервер шлёт событие task.created."
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTaskRequest"
+      responses:
+        "201":
+          description: Задача создана. Id назначает сервер
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /tasks/{id}:
+    parameters:
+      - $ref: "#/components/parameters/TaskId"
+    get:
+      tags: [Задачи]
+      operationId: getTask
+      summary: Получить задачу по id
+      responses:
+        "200":
+          description: Найденная задача
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Задачи]
+      operationId: updateTask
+      summary: Заменить задачу
+      description: "Роль USER меняет только свою задачу, иначе 403. Роль ADMIN меняет любую. После записи сервер шлёт событие task.updated."
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTaskRequest"
+      responses:
+        "200":
+          description: Обновлённая задача
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+    delete:
+      tags: [Задачи]
+      operationId: deleteTask
+      summary: Удалить задачу
+      description: "Только роль ADMIN. USER получает 403 даже если задачи нет. После удаления сервер шлёт событие task.deleted."
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: Задача удалена, тела нет
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /register:
+    post:
+      tags: [Аутентификация]
+      operationId: register
+      summary: Зарегистрировать пользователя
+      description: "Всегда создаёт роль USER. Поле role в теле игнорируется, администратора так назначить нельзя."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: Пользователь создан. Пароль в ответ не входит
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /login:
+    post:
+      tags: [Аутентификация]
+      operationId: login
+      summary: Войти и получить JWT
+      description: "Пароль проверяется сверкой BCrypt-хэша. В токене есть срок действия и claims userId, login, role."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Токен выдан
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /users:
+    get:
+      tags: [Пользователи]
+      operationId: listUsers
+      summary: Список пользователей
+      description: "Только роль ADMIN. В ответе нет хэша пароля."
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Пользователи без секретов
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/UserResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /notifications:
+    get:
+      tags: [Уведомления]
+      operationId: taskNotifications
+      summary: WebSocket-уведомления о задачах
+      description: "Это WebSocket, а не обычный GET. Query-параметр token — JWT любой роли. Первое сообщение имеет type connected. Дальше приходят task.created, task.updated и task.deleted."
+      parameters:
+        - name: token
+          in: query
+          required: true
+          description: JWT из POST /login
+          schema:
+            type: string
+      responses:
+        "101":
+          description: Соединение переключено на WebSocket
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: "Токен из POST /login. Заголовок: Authorization Bearer. Роль читается из базы, а не только из токена."
+  parameters:
+    TaskId:
+      name: id
+      in: path
+      required: true
+      description: Положительное целое число
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+  responses:
+    BadRequest:
+      description: Неверное тело или path
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unauthorized:
+      description: Нет токена, токен недействителен или неверный пароль
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Forbidden:
+      description: Токен действителен, но роль не подходит
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: Задача или маршрут не найдены
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Conflict:
+      description: Логин или название уже заняты
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+  schemas:
+    Priority:
+      type: string
+      enum: [LOW, MEDIUM, HIGH]
+    Role:
+      type: string
+      enum: [USER, ADMIN]
+    Task:
+      type: object
+      required: [id, title, done, priority, ownerId]
+      properties:
+        id:
+          type: integer
+          format: int32
+        title:
+          type: string
+        done:
+          type: boolean
+        priority:
+          $ref: "#/components/schemas/Priority"
+        ownerId:
+          type: integer
+          format: int32
+          description: Id пользователя, который создал задачу
+    CreateTaskRequest:
+      type: object
+      required: [title]
+      description: "Поле id не передаётся, его назначает сервер. done по умолчанию false, priority по умолчанию MEDIUM."
+      properties:
+        title:
+          type: string
+        done:
+          type: boolean
+        priority:
+          $ref: "#/components/schemas/Priority"
+    UpdateTaskRequest:
+      type: object
+      required: [title, done, priority]
+      description: Полная замена задачи. Поле id в тело не входит.
+      properties:
+        title:
+          type: string
+        done:
+          type: boolean
+        priority:
+          $ref: "#/components/schemas/Priority"
+    RegisterRequest:
+      type: object
+      required: [login, password]
+      properties:
+        login:
+          type: string
+          description: "3-32 символа: латиница, цифры, _ и -."
+        password:
+          type: string
+          description: От 6 до 72 символов. В хранилище попадает только хэш.
+    LoginRequest:
+      type: object
+      required: [login, password]
+      properties:
+        login:
+          type: string
+        password:
+          type: string
+    UserResponse:
+      type: object
+      required: [id, login, role]
+      properties:
+        id:
+          type: integer
+          format: int32
+        login:
+          type: string
+        role:
+          $ref: "#/components/schemas/Role"
+    TokenResponse:
+      type: object
+      required: [token, tokenType, expiresIn, userId, role]
+      properties:
+        token:
+          type: string
+        tokenType:
+          type: string
+        expiresIn:
+          type: integer
+          format: int64
+          description: Срок действия токена в секундах
+        userId:
+          type: integer
+          format: int32
+          description: Тот же идентификатор записан в claim userId
+        role:
+          $ref: "#/components/schemas/Role"
+    TaskEvent:
+      type: object
+      required: [type, task]
+      properties:
+        type:
+          type: string
+          description: "task.created, task.updated или task.deleted"
+        task:
+          $ref: "#/components/schemas/Task"
+    ServiceInfo:
+      type: object
+      required: [name, description]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+    ErrorResponse:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+        message:
+          type: string
